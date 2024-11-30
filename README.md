@@ -1,5 +1,7 @@
 # Alexa Skill with Gemini AI
 
+ノーコードでアレクサにGeminiのスキルを作成することができます。
+
 ## セットアップ手順
 
 1. `lambda/keys.template.js`を`lambda/keys.js`にコピー
@@ -9,3 +11,7 @@
 ## 注意
 `keys.js`は`.gitignore`に含まれており、APIキーなどの機密情報はGitHubにアップロードされません。
 
+## 参考
+
+https://note.com/eito_hijikata/n/nd81a26f26faa
+で紹介されていたものをベースに作成しています。
