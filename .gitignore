@@ -1,0 +1,10 @@
+# APIキーなどの機密情報
+lambda/keys.js
+
+# Node.js
+node_modules/
+package-lock.json
+
+# その他
+.DS_Store
+*.log 
