@@ -2,6 +2,11 @@
 
 ノーコードでアレクサにGeminiのスキルを作成することができます。
 
+## 必要な環境
+
+- Node.js 18.0.0以上
+- AWS Lambda Node.js 18.x ランタイム
+
 ## セットアップ手順
 
 1. `lambda/keys.template.js`を`lambda/keys.js`にコピー

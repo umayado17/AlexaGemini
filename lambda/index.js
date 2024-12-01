@@ -8,7 +8,7 @@ const Alexa = require('ask-sdk-core');
 // const { Configuration, OpenAIApi } = require("openai");  // ChatGPT用
 const keys = require('keys');
 const persistenceAdapter = require('ask-sdk-s3-persistence-adapter');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const axios = require('axios');
 
 // ChatGPT用の設定（参考用にコメントとして保持）
 /*
@@ -18,53 +18,66 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 */
 
-// Gemini APIの設定を初期化
-const genAI = new GoogleGenerativeAI(keys.GEMINI_API_KEY);
-
 // API応答取得関数
 async function getAnswer(messages) {
-    // ChatGPT用のコード（参考用）
-    /*
-    const response = await openai.createChatCompletion({
-        model: keys.model,
-        messages: messages
-    });
-    return response.data;
-    */
+    const API_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${keys.model}:generateContent`;
+    
+    try {
+      // 会話履歴をGemini APIの形式に変換
+      const formattedMessages = messages.map(msg => {
+        if (msg.role === 'system') {
+          return {
+            role: 'user',
+            parts: [{
+              text: `Instructions: ${msg.content}`
+            }]
+          };
+        }
+        return {
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{
+            text: msg.content
+          }]
+        };
+      });
 
-    // Gemini用の新しい実装
-    const model = genAI.getGenerativeModel({ model: keys.model });
-    
-    // 会話履歴を Gemini 形式に変換
-    const chatHistory = messages.slice(1).map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: msg.content
-    }));
-    
-    // チャットセッションを開始し、会話履歴と最大出力トークン数を設定
-    const chat = model.startChat({
-        history: chatHistory,
-        generationConfig: {
-            maxOutputTokens: 10000,
+      console.log('Sending to Gemini:', JSON.stringify(formattedMessages, null, 2));
+
+      const response = await axios.post(
+        `${API_ENDPOINT}?key=${keys.GEMINI_API_KEY}`,
+        {
+          contents: formattedMessages,
+          generationConfig: {
+            maxOutputTokens: 800,
+            temperature: 0.7
+          }
         },
-    });
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-    // ユーザーからの最新のメッセージを送信し、結果を待機
-    const result = await chat.sendMessage(messages[messages.length - 1].content);
-    // Geminiからの応答を取得
-    const response = await result.response;
-    
-    // ChatGPT APIの応答形式に合わせてレスポンスを整形して返す
-    return {
+      if (!response.data.candidates || !response.data.candidates[0]?.content?.parts?.[0]?.text) {
+        console.error('Unexpected Gemini response:', JSON.stringify(response.data, null, 2));
+        throw new Error('Invalid response format from Gemini API');
+      }
+
+      return {
         choices: [{
-            message: {
-                content: response.text()
-            }
+          message: {
+            content: response.data.candidates[0].content.parts[0].text
+          }
         }],
         usage: {
-            total_tokens: 0  // Gemini では正確なトークン数が取得できないため
+          total_tokens: 0
         }
-    };
+      };
+    } catch (error) {
+      console.error('Gemini API Error:', error.response?.data || error.message);
+      throw error;
+    }
 }
 
 // 文字列内の改行を空白に置換する関数
@@ -106,26 +119,45 @@ const ChatGPTIntentHandler = {
         if(!attr.conversation){
             attr.conversation = [{role: 'system', content: keys.system_message}];
         }
-        // ユーザーの質問を取得して会話履歴に追加
-        const question = Alexa.getSlotValue(handlerInput.requestEnvelope, 'question');
-        attr.conversation.push({ role : 'user', content : question });
         
-        // ChatGPTに質問を送信して回答を取得
-        const response = await getAnswer(attr.conversation);
-        const speakOutput = formatString(response.choices[0].message.content);
-        
-        // ChatGPTの回答を会話履歴に追加
-        attr.conversation.push({ role : 'assistant', content: speakOutput });
-        // トークン数が1500を超えた場合、古い会話を削除
-        if(response.usage.total_tokens > 1500) {
-            attr.conversation.shift();
-            attr.conversation.shift();
+        try {
+            // ユーザーの質問を取得して会話履歴に追加
+            const question = Alexa.getSlotValue(handlerInput.requestEnvelope, 'question');
+            attr.conversation.push({ role : 'user', content : question });
+            
+            // Geminiに質問を送信して回答を取得
+            const response = await getAnswer(attr.conversation);
+            
+            if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
+                throw new Error('Invalid response format from Gemini API');
+            }
+            
+            const speakOutput = formatString(response.choices[0].message.content);
+            
+            // Geminiの回答を会話履歴に追加
+            attr.conversation.push({ role : 'assistant', content: speakOutput });
+            
+            // 会話履歴が長くなりすぎた場合、古い会話を削除
+            if(attr.conversation.length > 10) {
+                attr.conversation.shift();
+                attr.conversation.shift();
+            }
+            
+            // セッション属性を更新
+            handlerInput.attributesManager.setSessionAttributes(attr);
+            
+            return handlerInput.responseBuilder
+                .speak(speakOutput)
+                .reprompt('他に質問はありますか？')
+                .getResponse();
+                
+        } catch (error) {
+            console.error('Error in ChatGPTIntentHandler:', error);
+            return handlerInput.responseBuilder
+                .speak('申し訳ありません。エラーが発生しました。もう一度お試しください。')
+                .reprompt('他の質問はありますか？')
+                .getResponse();
         }
-        
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt('他に質問はありますか？')
-            .getResponse();
     }
 };
 

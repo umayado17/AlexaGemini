@@ -8,7 +8,6 @@ module.exports.model = 'gpt-3.5-turbo';
 // Gemini用の新しい設定
 module.exports = {
     GEMINI_API_KEY: 'あなたのGemini APIキー',
-//    model: 'gemini-1.5-pro',
     model: 'gemini-1.5-flash',
     system_message: '２００字以内で答えて。漢字の読み方を間違えないようにふりがなを振ってください。'
 };
