@@ -98,12 +98,23 @@ const ChangeLLMIntentHandler = {
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ChangeLLMIntent';
     },
     handle(handlerInput) {
-        const llmType = Alexa.getSlotValue(handlerInput.requestEnvelope, 'llm_type').toLowerCase();
+        const llmSlot = Alexa.getSlotValue(handlerInput.requestEnvelope, 'llm_type');
+        
+        // LLM名のマッピング
+        const llmMapping = {
+            'クロード': 'claude',
+            'チャットジーピーティー': 'chatgpt',
+            'チャットgpt': 'chatgpt',
+            'ジェミニ': 'gemini'
+        };
+        
+        const llmType = llmMapping[llmSlot.toLowerCase()] || llmSlot.toLowerCase();
         
         // LLMタイプの存在チェック
         if (!config.llm_configs[llmType]) {
             return handlerInput.responseBuilder
-                .speak('指定されたAIモデルは利用できません。')
+                .speak(`申し訳ありません。${llmSlot}は利用できません。ChatGPT、Claude、またはGeminiを指定してください。`)
+                .reprompt('他のAIモデルを指定してください。')
                 .getResponse();
         }
 
@@ -115,13 +126,20 @@ const ChangeLLMIntentHandler = {
                 'claude': 'Claude'
             };
             return handlerInput.responseBuilder
-                .speak(`${llmNames[llmType]}のAPIキーが設定されていませんので、このLLMには切り替えられません。`)
+                .speak(`${llmNames[llmType]}のAPIキーが設定されていませんので、このAIモデルには切り替えられません。`)
+                .reprompt('他のAIモデルを指定してください。')
                 .getResponse();
         }
 
         setSelectedLLM(handlerInput, llmType);
+        const llmNames = {
+            'chatgpt': 'ChatGPT',
+            'gemini': 'Gemini',
+            'claude': 'Claude'
+        };
         return handlerInput.responseBuilder
-            .speak(`${llmType}モードに切り替えました。`)
+            .speak(`${llmNames[llmType]}モードに切り替えました。`)
+            .reprompt('質問してください。')
             .getResponse();
     }
 };
@@ -176,7 +194,47 @@ const ChatGPTIntentHandler = {
     }
 };
 
-// その他の必要なハンドラー...
+// LaunchRequestHandlerを追加
+const LaunchRequestHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
+    },
+    handle(handlerInput) {
+        const speakOutput = 'ようこそ。質問してください。';
+        
+        return handlerInput.responseBuilder
+            .speak(speakOutput)
+            .reprompt(speakOutput)
+            .getResponse();
+    }
+};
+
+// SessionEndedRequestHandlerも追加
+const SessionEndedRequestHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'SessionEndedRequest';
+    },
+    handle(handlerInput) {
+        console.log(`~~~~ Session ended: ${JSON.stringify(handlerInput.requestEnvelope)}`);
+        return handlerInput.responseBuilder.getResponse();
+    }
+};
+
+// ErrorHandlerも追加
+const ErrorHandler = {
+    canHandle() {
+        return true;
+    },
+    handle(handlerInput, error) {
+        console.log(`~~~~ Error handled: ${JSON.stringify(error)}`);
+        const speakOutput = '申し訳ありません。エラーが発生しました。もう一度お試しください。';
+
+        return handlerInput.responseBuilder
+            .speak(speakOutput)
+            .reprompt(speakOutput)
+            .getResponse();
+    }
+};
 
 exports.handler = Alexa.SkillBuilders.custom()
     .addRequestHandlers(

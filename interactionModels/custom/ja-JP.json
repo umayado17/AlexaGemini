@@ -50,35 +50,21 @@
           "name": "LLM_TYPE",
           "values": [
             {
-              "id": "CHATGPT",
               "name": {
-                "value": "ChatGPT",
-                "synonyms": [
-                  "ジーピーティー",
-                  "チャットジーピーティー",
-                  "チャッピー"
-                ]
+                "value": "クロード",
+                "synonyms": ["Claude", "クロウド"]
               }
             },
             {
-              "id": "GEMINI",
               "name": {
-                "value": "Gemini",
-                "synonyms": [
-                  "ジェミナイ",
-                  "ジェミニ"
-                ]
+                "value": "チャットジーピーティー",
+                "synonyms": ["ChatGPT", "チャットGPT", "GPT"]
               }
             },
             {
-              "id": "CLAUDE",
               "name": {
-                "value": "Claude",
-                "synonyms": [
-                  "クロード",
-                  "クロさん",
-                  "クロード先生"
-                ]
+                "value": "ジェミニ",
+                "synonyms": ["Gemini", "ジェミナイ"]
               }
             }
           ]
