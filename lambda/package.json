@@ -9,7 +9,6 @@
   "author": "Amazon Alexa",
   "license": "Apache-2.0",
   "dependencies": {
-    "@google/generative-ai": "^0.0.1",
     "ask-sdk-core": "^2.7.0",
     "ask-sdk-model": "^1.19.0",
     "aws-sdk": "^2.326.0",
