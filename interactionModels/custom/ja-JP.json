@@ -39,9 +39,9 @@
             }
           ],
           "samples": [
-            "{llm_type}に切り替えて",
-            "{llm_type}を使って",
-            "{llm_type}モードに変更して"
+            "{llm_type} に切り替えて",
+            "{llm_type} を使って",
+            "{llm_type} モードに変更して"
           ]
         }
       ],
@@ -50,21 +50,35 @@
           "name": "LLM_TYPE",
           "values": [
             {
+              "id": "CHATGPT",
               "name": {
                 "value": "ChatGPT",
-                "synonyms": ["ジーピーティー", "チャットジーピーティー", "チャッピー"]
+                "synonyms": [
+                  "ジーピーティー",
+                  "チャットジーピーティー",
+                  "チャッピー"
+                ]
               }
             },
             {
+              "id": "GEMINI",
               "name": {
                 "value": "Gemini",
-                "synonyms": ["ジェミナイ", "ジェミニ"]
+                "synonyms": [
+                  "ジェミナイ",
+                  "ジェミニ"
+                ]
               }
             },
             {
+              "id": "CLAUDE",
               "name": {
                 "value": "Claude",
-                "synonyms": ["クロード", "クロさん", "クロード先生"]
+                "synonyms": [
+                  "クロード",
+                  "クロさん",
+                  "クロード先生"
+                ]
               }
             }
           ]
