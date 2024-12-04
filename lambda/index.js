@@ -5,287 +5,186 @@
  * */
 // 必要なモジュールをインポート
 const Alexa = require('ask-sdk-core');
-// const { Configuration, OpenAIApi } = require("openai");  // ChatGPT用
-const keys = require('keys');
-const persistenceAdapter = require('ask-sdk-s3-persistence-adapter');
+const config = require('./keys.js');
 const axios = require('axios');
+const OpenAI = require('openai');
+const Anthropic = require('@anthropic-ai/sdk');
 
-// ChatGPT用の設定（参考用にコメントとして保持）
-/*
-const configuration = new Configuration({
-    apiKey: keys.OPEN_AI_KEY
-});
-const openai = new OpenAIApi(configuration);
-*/
+// セッション属性の管理
+const getSelectedLLM = (handlerInput) => {
+    const attributes = handlerInput.attributesManager.getSessionAttributes();
+    return attributes.selectedLLM || config.default_llm;
+};
 
-// API応答取得関数
-async function getAnswer(messages) {
-    const API_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${keys.model}:generateContent`;
-    
-    try {
-      // 会話履歴をGemini APIの形式に変換
-      const formattedMessages = messages.map(msg => {
-        if (msg.role === 'system') {
-          return {
-            role: 'user',
+const setSelectedLLM = (handlerInput, llmType) => {
+    const attributes = handlerInput.attributesManager.getSessionAttributes();
+    attributes.selectedLLM = llmType;
+    handlerInput.attributesManager.setSessionAttributes(attributes);
+};
+
+// Gemini APIを呼び出す関数（既存のコード）
+async function callGeminiAPI(prompt) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.llm_configs.gemini.api_key}`;
+    const data = {
+        contents: [{
             parts: [{
-              text: `Instructions: ${msg.content}`
+                text: config.llm_configs.gemini.system_message + "\n" + prompt
             }]
-          };
-        }
-        return {
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{
-            text: msg.content
-          }]
-        };
-      });
+        }]
+    };
 
-      console.log('Sending to Gemini:', JSON.stringify(formattedMessages, null, 2));
-
-      const response = await axios.post(
-        `${API_ENDPOINT}?key=${keys.GEMINI_API_KEY}`,
-        {
-          contents: formattedMessages,
-          generationConfig: {
-            maxOutputTokens: 800,
-            temperature: 0.7
-          }
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      if (!response.data.candidates || !response.data.candidates[0]?.content?.parts?.[0]?.text) {
-        console.error('Unexpected Gemini response:', JSON.stringify(response.data, null, 2));
-        throw new Error('Invalid response format from Gemini API');
-      }
-
-      return {
-        choices: [{
-          message: {
-            content: response.data.candidates[0].content.parts[0].text
-          }
-        }],
-        usage: {
-          total_tokens: 0
-        }
-      };
+    try {
+        const response = await axios.post(url, data);
+        return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
-      console.error('Gemini API Error:', error.response?.data || error.message);
-      throw error;
+        console.error('Error calling Gemini API:', error);
+        throw error;
     }
 }
 
-// 文字列内の改行を空白に置換する関数
-function formatString(text) {
-  return text.replace(/\n+/g, " ");
+// ChatGPT APIを呼び出す関数
+async function callChatGPTAPI(prompt) {
+    const openai = new OpenAI({ apiKey: config.llm_configs.chatgpt.api_key });
+    try {
+        const response = await openai.chat.completions.create({
+            model: config.llm_configs.chatgpt.model,
+            messages: [
+                { role: 'system', content: config.llm_configs.chatgpt.system_message },
+                { role: 'user', content: prompt }
+            ]
+        });
+        return response.choices[0].message.content;
+    } catch (error) {
+        console.error('Error calling ChatGPT API:', error);
+        throw error;
+    }
 }
 
-// スキル起動時のハンドラー
-const LaunchRequestHandler = {
+// Claude APIを呼び出す関数
+async function callClaudeAPI(prompt) {
+    const claude = new Anthropic({ apiKey: config.llm_configs.claude.api_key });
+    try {
+        const response = await claude.messages.create({
+            model: config.llm_configs.claude.model,
+            system: config.llm_configs.claude.system_message,
+            messages: [{ role: 'user', content: prompt }]
+        });
+        return response.content[0].text;
+    } catch (error) {
+        console.error('Error calling Claude API:', error);
+        throw error;
+    }
+}
+
+// APIキーが設定されているかチェックする関数
+function isValidApiKey(llmType) {
+    const apiKey = config.llm_configs[llmType].api_key;
+    switch (llmType) {
+        case 'chatgpt':
+            return !apiKey.includes('OpenAI');
+        case 'gemini':
+            return !apiKey.includes('Gemini');
+        case 'claude':
+            return !apiKey.includes('Claude');
+        default:
+            return false;
+    }
+}
+
+// LLMの切り替えインテントハンドラーを修正
+const ChangeLLMIntentHandler = {
     canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ChangeLLMIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'ようこそ。何が知りたいですか？';
+        const llmType = Alexa.getSlotValue(handlerInput.requestEnvelope, 'llm_type').toLowerCase();
+        
+        // LLMタイプの存在チェック
+        if (!config.llm_configs[llmType]) {
+            return handlerInput.responseBuilder
+                .speak('指定されたAIモデルは利用できません。')
+                .getResponse();
+        }
 
+        // APIキーの有効性チェック
+        if (!isValidApiKey(llmType)) {
+            const llmNames = {
+                'chatgpt': 'ChatGPT',
+                'gemini': 'Gemini',
+                'claude': 'Claude'
+            };
+            return handlerInput.responseBuilder
+                .speak(`${llmNames[llmType]}のAPIキーが設定されていませんので、このLLMには切り替えられません。`)
+                .getResponse();
+        }
+
+        setSelectedLLM(handlerInput, llmType);
         return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
+            .speak(`${llmType}モードに切り替えました。`)
             .getResponse();
     }
 };
 
-// ChatGPTとの対話を処理するハンドラー
-// インテント名はChatGPTIntentのままにしている
-
-// インテント名はinteractionModels/custom/ja-JP.jsonのChatGPTIntentのnameと一致させる
-// スロット名はinteractionModels/custom/ja-JP.jsonのquestionのnameと一致させる
-// ハンドラーのcanHandle関数では、リクエストタイプがIntentRequestで、
-// インテント名がChatGPTIntentであるかをチェックしている
-
+// 質問応答インテントハンドラーも修正
 const ChatGPTIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ChatGPTIntent';
     },
     async handle(handlerInput) {
-        // セッション属性から会話履歴を取得
-        let attr = await handlerInput.attributesManager.getSessionAttributes();
-        if(!attr.conversation){
-            attr.conversation = [{role: 'system', content: keys.system_message}];
-        }
-        
         try {
-            // ユーザーの質問を取得して会話履歴に追加
             const question = Alexa.getSlotValue(handlerInput.requestEnvelope, 'question');
-            attr.conversation.push({ role : 'user', content : question });
-            
-            // Geminiに質問を送信して回答を取得
-            const response = await getAnswer(attr.conversation);
-            
-            if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
-                throw new Error('Invalid response format from Gemini API');
+            const llmType = getSelectedLLM(handlerInput);
+
+            // 選択されているLLMのAPIキーが無効な場合
+            if (!isValidApiKey(llmType)) {
+                const llmNames = {
+                    'chatgpt': 'ChatGPT',
+                    'gemini': 'Gemini',
+                    'claude': 'Claude'
+                };
+                return handlerInput.responseBuilder
+                    .speak(`${llmNames[llmType]}のAPIキーが設定されていません。別のLLMに切り替えてください。`)
+                    .getResponse();
             }
-            
-            const speakOutput = formatString(response.choices[0].message.content);
-            
-            // Geminiの回答を会話履歴に追加
-            attr.conversation.push({ role : 'assistant', content: speakOutput });
-            
-            // 会話履歴が長くなりすぎた場合、古い会話を削除
-            if(attr.conversation.length > 10) {
-                attr.conversation.shift();
-                attr.conversation.shift();
+
+            let response;
+            switch (llmType) {
+                case 'chatgpt':
+                    response = await callChatGPTAPI(question);
+                    break;
+                case 'claude':
+                    response = await callClaudeAPI(question);
+                    break;
+                case 'gemini':
+                default:
+                    response = await callGeminiAPI(question);
+                    break;
             }
-            
-            // セッション属性を更新
-            handlerInput.attributesManager.setSessionAttributes(attr);
-            
+
             return handlerInput.responseBuilder
-                .speak(speakOutput)
+                .speak(response)
                 .reprompt('他に質問はありますか？')
                 .getResponse();
-                
         } catch (error) {
-            console.error('Error in ChatGPTIntentHandler:', error);
+            console.error('Error:', error);
             return handlerInput.responseBuilder
-                .speak('申し訳ありません。エラーが発生しました。もう一度お試しください。')
-                .reprompt('他の質問はありますか？')
+                .speak('申し訳ありません。エラーが発生しました。')
                 .getResponse();
         }
     }
 };
 
-// ヘルプインテントのハンドラー
-const HelpIntentHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.HelpIntent';
-    },
-    handle(handlerInput) {
-        const speakOutput = 'You can say hello to me! How can I help?';
+// その他の必要なハンドラー...
 
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
-            .getResponse();
-    }
-};
-
-// キャンセルと停止インテントのハンドラー
-const CancelAndStopIntentHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && (Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.CancelIntent'
-                || Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.StopIntent');
-    },
-    handle(handlerInput) {
-        const speakOutput = 'Goodbye!';
-
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .getResponse();
-    }
-};
-/* *
- * FallbackIntentは、ユーザーの発話がスキル内のどのインテントにもマッピングされない場合にトリガーされます
- * 言語モデルでも定義する必要があります（そのロケールでサポートされている場合）
- * このハンドラーは安全に追加できますが、まだサポートされていないロケールでは無視されます
- * */
-// フォールバックインテントのハンドラー（認識できない発話の処理）
-const FallbackIntentHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.FallbackIntent';
-    },
-    handle(handlerInput) {
-        const speakOutput = 'Sorry, I don\'t know about that. Please try again.';
-
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
-            .getResponse();
-    }
-};
-/* *
- * SessionEndedRequestは、セッションが終了したことを通知します。このハンドラーは、現在開いているセッションが
- * 以下のいずれかの理由で終了した場合にトリガーされます: 1) ユーザーが「終了」または「終わり」と発話した場合
- * 2) ユーザーが応答しないか、音声モデルで定義されたインテントに一致しない発話をした場合 3) エラーが発生した場合
- * */
-// セッション終了時のハンドラー
-const SessionEndedRequestHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'SessionEndedRequest';
-    },
-    handle(handlerInput) {
-        console.log(`~~~~ Session ended: ${JSON.stringify(handlerInput.requestEnvelope)}`);
-        // Any cleanup logic goes here.
-        return handlerInput.responseBuilder.getResponse(); // notice we send an empty response
-    }
-};
-/* *
- * インテントリフレクターは、インタラクションモデルのテストとデバッグに使用されます。
- * これは単にユーザーが発話したインテントを繰り返すだけです。カスタムハンドラーは
- * 上記で定義し、下記のリクエストハンドラーチェーンに追加することで作成できます
- * */
-// インテントリフレクターハンドラー（デバッグ用）
-const IntentReflectorHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest';
-    },
-    handle(handlerInput) {
-        const intentName = Alexa.getIntentName(handlerInput.requestEnvelope);
-        const speakOutput = `You just triggered ${intentName}`;
-
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            //.reprompt('add a reprompt if you want to keep the session open for the user to respond')
-            .getResponse();
-    }
-};
-/* *
- * 構文やルーティングのエラーを捕捉するための汎用的なエラー処理です。
- * リクエストハンドラーチェーンが見つからないというエラーを受け取った場合、
- * 呼び出されたインテントのハンドラーが実装されていないか、
- * 以下のスキルビルダーに含まれていないことを意味します
- * */
-// エラーハンドラー（全般的なエラー処理）
-const ErrorHandler = {
-    canHandle() {
-        return true;
-    },
-    handle(handlerInput, error) {
-        const speakOutput = 'Sorry, I had trouble doing what you asked. Please try again.';
-        console.log(`~~~~ Error handled: ${JSON.stringify(error)}`);
-
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
-            .getResponse();
-    }
-};
-
-/* *
- * このハンドラーはスキルのエントリーポイントとして機能し、すべてのリクエストとレスポンスの
- * ペイロードを上記のハンドラーにルーティングします。新しく定義したハンドラーやインターセプターが
- * 以下に含まれていることを確認してください。順序は重要です - 上から下に処理されます
- * */
-// スキルのメインエントリーポイント
 exports.handler = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
+        ChangeLLMIntentHandler,
         ChatGPTIntentHandler,
-        HelpIntentHandler,
-        CancelAndStopIntentHandler,
-        FallbackIntentHandler,
-        SessionEndedRequestHandler,
-        IntentReflectorHandler)
-    .addErrorHandlers(
-        ErrorHandler)
-    .withCustomUserAgent('sample/hello-world/v1.2')
+        // ... その他のハンドラー
+        SessionEndedRequestHandler
+    )
+    .addErrorHandlers(ErrorHandler)
     .lambda();

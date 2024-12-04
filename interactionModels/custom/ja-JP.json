@@ -29,9 +29,47 @@
           "samples": [
             "{question}"
           ]
+        },
+        {
+          "name": "ChangeLLMIntent",
+          "slots": [
+            {
+              "name": "llm_type",
+              "type": "LLM_TYPE"
+            }
+          ],
+          "samples": [
+            "{llm_type}に切り替えて",
+            "{llm_type}を使って",
+            "{llm_type}モードに変更して"
+          ]
         }
       ],
-      "types": [],
+      "types": [
+        {
+          "name": "LLM_TYPE",
+          "values": [
+            {
+              "name": {
+                "value": "ChatGPT",
+                "synonyms": ["ジーピーティー", "チャットジーピーティー", "チャッピー"]
+              }
+            },
+            {
+              "name": {
+                "value": "Gemini",
+                "synonyms": ["ジェミナイ", "ジェミニ"]
+              }
+            },
+            {
+              "name": {
+                "value": "Claude",
+                "synonyms": ["クロード", "クロさん", "クロード先生"]
+              }
+            }
+          ]
+        }
+      ],
       "invocationName": "ジェミニ"
     }
   }
